@@ -1,0 +1,12 @@
+# Railway ERP System
+
+Проект системы ERP для железных дорог.
+
+## Назначение
+Управление ресурсами, планирование, логистика.
+
+## Технологии
+- Backend: Java/Spring
+- Frontend: React
+- База данных: PostgreSQL
+- CI/CD: Jenkins
