@@ -583,10 +583,15 @@ def sendTelegramNotification(Map params = [:]) {
 
     def config = statusConfig[status] ?: [emoji: '📋', color: '#9b59b6', title: 'Информация']
 
+    // ВЫЧИСЛЯЕМ ДАТУ ЗАРАНЕЕ
+    def currentTime = new Date().format('dd.MM.yyyy HH:mm:ss')
+    def jenkinsUrl = env.JENKINS_URL ?: 'localhost'
+
     withCredentials([
         string(credentialsId: 'telegram-bot-token', variable: 'BOT_TOKEN'),
         string(credentialsId: 'telegram-chat-id', variable: 'CHAT_ID')
     ]) {
+        // ИСПОЛЬЗУЕМ ПРЕДВЫЧИСЛЕННЫЕ ЗНАЧЕНИЯ
         def htmlMessage = """
 <b>${config.emoji} ${config.title}: ${PROJECT_NAME}</b>
 
@@ -595,8 +600,8 @@ ${message}
 <pre>${details}</pre>
 
 <code>────────────────────</code>
-<b>Время:</b> ${new Date().format('dd.MM.yyyy HH:mm:ss')}
-<b>Jenkins:</b> ${env.JENKINS_URL ?: 'localhost'}
+<b>Время:</b> ${currentTime}
+<b>Jenkins:</b> ${jenkinsUrl}
 
 <a href="${env.BUILD_URL}">📎 Открыть сборку</a> |
 <a href="${env.PROJECT_URL}">🐙 Репозиторий</a>
@@ -619,7 +624,7 @@ ${message}
             """
             echo "✅ Уведомление отправлено в Telegram"
         } catch (Exception e) {
-            echo "⚠️ Не удалось отправить уведомление в Telegram: ${e.message}"
+            echo "⚠️ Не удалось отправить уведомление в Telegram: \${e.message}"
         }
     }
 }
