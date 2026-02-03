@@ -176,30 +176,30 @@ pipeline {
         }
     }
 
-    post {
-        always {
-            echo '📊 Build completed'
-            echo "Status: ${currentBuild.currentResult}"
+post {
+    always {
+        echo '📊 Build completed'
+        echo "Status: ${currentBuild.currentResult}"
 
-            script {
-                // Сохраняем логи сборки
-                sh '''
-                    mkdir -p build_logs
-                    date > build_logs/build_time.txt
-                    echo "Job: ${JOB_NAME} #${BUILD_NUMBER}" >> build_logs/build_time.txt
-                    echo "Branch: main" >> build_logs/build_time.txt
-                    echo "Commit: '"'${GIT_COMMIT}'"' >> build_logs/build_time.txt
-                    echo "Result: ${currentBuild.currentResult}" >> build_logs/build_time.txt
+        script {
+            // Сохраняем логи сборки
+            sh """
+                mkdir -p build_logs
+                date > build_logs/build_time.txt
+                echo "Job: ${JOB_NAME} #${BUILD_NUMBER}" >> build_logs/build_time.txt
+                echo "Branch: main" >> build_logs/build_time.txt
+                echo "Commit: ${GIT_COMMIT}" >> build_logs/build_time.txt
+                echo "Result: ${currentBuild.currentResult}" >> build_logs/build_time.txt
 
-                    # Сохраняем информацию о кэше
-                    echo "=== Maven Cache Info ===" >> build_logs/build_time.txt
-                    du -sh ${HOME}/.m2/repository 2>/dev/null >> build_logs/build_time.txt || echo "Cache info unavailable" >> build_logs/build_time.txt
-                '''
+                # Сохраняем информацию о кэше
+                echo "=== Maven Cache Info ===" >> build_logs/build_time.txt
+                du -sh \${HOME}/.m2/repository 2>/dev/null >> build_logs/build_time.txt || echo "Cache info unavailable" >> build_logs/build_time.txt
+            """
 
-                // Архивируем артефакты
-                archiveArtifacts artifacts: 'build_logs/**/*, target/*.jar', allowEmptyArchive: true
-            }
+            // Архивируем артефакты
+            archiveArtifacts artifacts: 'build_logs/**/*, target/*.jar', allowEmptyArchive: true
         }
+    }
 
         success {
             echo '✅ Build successful!'
