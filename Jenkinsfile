@@ -570,62 +570,15 @@ EOF
 def sendTelegramNotification(Map params = [:]) {
     def status = params.status ?: 'info'
     def message = params.message ?: 'Уведомление из Jenkins'
-    def details = params.details ?: ''
 
-    // Эмодзи и цвета для разных статусов
-    def statusConfig = [
-        'start':   [emoji: '🚀', color: '#3498db', title: 'Запуск сборки'],
-        'success': [emoji: '✅', color: '#2ecc71', title: 'Успех'],
-        'failure': [emoji: '❌', color: '#e74c3c', title: 'Ошибка'],
-        'aborted': [emoji: '⏸️', color: '#95a5a6', title: 'Отменено'],
-        'unstable':[emoji: '⚠️', color: '#f39c12', title: 'Нестабильно']
-    ]
+    echo "📱 Telegram (заглушка): ${status.toUpperCase()} - ${message}"
+    echo "Детали: ${params.details ?: 'нет'}"
 
-    def config = statusConfig[status] ?: [emoji: '📋', color: '#9b59b6', title: 'Информация']
-
-    // ВЫЧИСЛЯЕМ ДАТУ ЗАРАНЕЕ
-    def currentTime = new Date().format('dd.MM.yyyy HH:mm:ss')
-    def jenkinsUrl = env.JENKINS_URL ?: 'localhost'
-
-    withCredentials([
-        string(credentialsId: 'telegram-bot-token', variable: 'BOT_TOKEN'),
-        string(credentialsId: 'telegram-chat-id', variable: 'CHAT_ID')
-    ]) {
-        // ИСПОЛЬЗУЕМ ПРЕДВЫЧИСЛЕННЫЕ ЗНАЧЕНИЯ
-        def htmlMessage = """
-<b>${config.emoji} ${config.title}: ${PROJECT_NAME}</b>
-
-${message}
-
-<pre>${details}</pre>
-
-<code>────────────────────</code>
-<b>Время:</b> ${currentTime}
-<b>Jenkins:</b> ${jenkinsUrl}
-
-<a href="${env.BUILD_URL}">📎 Открыть сборку</a> |
-<a href="${env.PROJECT_URL}">🐙 Репозиторий</a>
-        """.trim()
-
-        // Кодируем для URL
-        def encodedMessage = java.net.URLEncoder.encode(htmlMessage, "UTF-8")
-
-        try {
-            sh """
-                curl -s -X POST "https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage" \
-                -d "chat_id=\${CHAT_ID}" \
-                -d "text=${encodedMessage}" \
-                -d "parse_mode=HTML" \
-                -d "disable_web_page_preview=true" \
-                --connect-timeout 10 \
-                --max-time 30 \
-                --retry 2 \
-                --retry-delay 1
-            """
-            echo "✅ Уведомление отправлено в Telegram"
-        } catch (Exception e) {
-            echo "⚠️ Не удалось отправить уведомление в Telegram: \${e.message}"
-        }
+    // Просто логируем, не отправляем реально
+    if (params.status == 'success') {
+        echo "✅ Уведомление об успехе было бы отправлено в Telegram"
+    } else if (params.status == 'failure') {
+        echo "❌ Уведомление об ошибке было бы отправлено в Telegram"
     }
 }
 
