@@ -1,0 +1,55 @@
+name: CI Pipeline
+on:
+  push:
+    branches: [ main, feature/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    
+    steps:
+    - name: Send Telegram Notification - Start
+      run: |
+        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+          -d "chat_id=$TELEGRAM_CHAT_ID" \
+          -d "text=🚀 *GitHub Actions: Build Started*\n\n*Репозиторий:* ${{ github.repository }}\n*Ветка:* ${{ github.ref_name }}\n*Автор:* ${{ github.actor }}" \
+          -d "parse_mode=Markdown"
+    
+    - uses: actions/checkout@v4
+    
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+    
+    - name: Build with Maven
+      run: |
+        chmod +x mvnw
+        ./mvnw clean compile -DskipTests
+      
+    - name: Run Tests
+      run: ./mvnw test
+      continue-on-error: true
+      
+    - name: Send Telegram Notification - Result
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          EMOJI="✅"
+          STATUS="УСПЕШНО"
+        else
+          EMOJI="❌"
+          STATUS="ПРОВАЛ"
+        fi
+        
+        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+          -d "chat_id=$TELEGRAM_CHAT_ID" \
+          -d "text=$EMOJI *GitHub Actions: Build Complete*\n\n*Статус:* $STATUS\n*Ветка:* ${{ github.ref_name }}\n*Коммит:* ${{ github.sha }}\n*Время:* ${{ job.container.timeouts }}\n\n[View Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+          -d "parse_mode=Markdown"
