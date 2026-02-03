@@ -36,17 +36,8 @@ pipeline {
         pollSCM('H/5 * * * *')
     }
 
-    // Окружение
+    // Окружение - только простые переменные
     environment {
-        // Определяем тип события
-        IS_PR = "${env.CHANGE_ID}" != "" && "${env.CHANGE_ID}" != "null"
-        IS_TAG = "${env.TAG_NAME}" != "" && "${env.TAG_NAME}" != "null"
-
-        // Информация о событии
-        EVENT_TYPE = IS_PR ? "Pull Request" : (IS_TAG ? "Tag" : "Push")
-        EVENT_INFO = IS_PR ? "PR #${env.CHANGE_ID}: ${env.CHANGE_TITLE}" :
-                    (IS_TAG ? "Tag: ${env.TAG_NAME}" : "Ветка: ${env.BRANCH_NAME}")
-
         // Проект
         PROJECT_NAME = 'Railway ERP System'
         PROJECT_URL = 'https://github.com/MisStiCc/RailwayErpSystem'
@@ -56,16 +47,9 @@ pipeline {
         JAVA_HOME = tool name: 'jdk17', type: 'jdk'
         MAVEN_HOME = tool name: 'maven-3.8', type: 'maven'
 
-        // Версия сборки
-        BUILD_VERSION = params.VERSION ?: "${env.BUILD_NUMBER}-${new Date().format('yyyyMMdd-HHmm')}"
-
         // Docker настройки
         DOCKER_REGISTRY = 'registry.example.com'
         DOCKER_NAMESPACE = 'railway'
-
-        // Окружения
-        DEPLOY_ENV = params.ENVIRONMENT
-        SKIP_TESTS_FLAG = params.SKIP_TESTS ? '-DskipTests' : ''
 
         // Telegram credentials (добавь в Jenkins)
         TELEGRAM_BOT_TOKEN = credentials('telegram-bot-token')
@@ -79,7 +63,7 @@ pipeline {
         disableConcurrentBuilds()
         parallelsAlwaysFailFast()
         timestamps()
-        ansiColor('xterm')
+        // Убрал ansiColor - может не быть плагина
     }
 
     stages {
@@ -87,6 +71,17 @@ pipeline {
         stage('🚀 Начало сборки') {
             steps {
                 script {
+                    // Вычисляем сложные переменные здесь, а не в environment
+                    def IS_PR = env.CHANGE_ID && env.CHANGE_ID != "null"
+                    def IS_TAG = env.TAG_NAME && env.TAG_NAME != "null"
+                    def EVENT_TYPE = IS_PR ? "Pull Request" : (IS_TAG ? "Tag" : "Push")
+                    def EVENT_INFO = IS_PR ? "PR #${env.CHANGE_ID}: ${env.CHANGE_TITLE}" :
+                                (IS_TAG ? "Tag: ${env.TAG_NAME}" : "Ветка: ${env.BRANCH_NAME}")
+
+                    def BUILD_VERSION = params.VERSION ?: "${env.BUILD_NUMBER}-${new Date().format('yyyyMMdd-HHmm')}"
+                    def DEPLOY_ENV = params.ENVIRONMENT
+                    def SKIP_TESTS_FLAG = params.SKIP_TESTS ? '-DskipTests' : ''
+
                     echo """
                     ========================================
                     ${PROJECT_NAME} - CI/CD Pipeline
@@ -154,23 +149,22 @@ pipeline {
         // ========== СТАДИЯ 3: ПОЛУЧЕНИЕ КОДА ==========
         stage('📥 Получение кода') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/${env.BRANCH_NAME ?: 'main'}"]],
-                    extensions: [
-                        [$class: 'CleanBeforeCheckout'],
-                        [$class: 'CloneOption', depth: 1, noTags: false, shallow: true],
-                        [$class: 'RelativeTargetDirectory', relativeTargetDir: 'src']
-                    ],
-                    userRemoteConfigs: [[
-                        url: 'git@github.com:MisStiCc/RailwayErpSystem.git',
-                        credentialsId: 'github-ssh-key'
-                    ]]
-                ])
+                script {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "*/${env.BRANCH_NAME ?: 'main'}"]],
+                        extensions: [
+                            [$class: 'CleanBeforeCheckout'],
+                            [$class: 'CloneOption', depth: 1, noTags: false, shallow: true],
+                            [$class: 'RelativeTargetDirectory', relativeTargetDir: 'src']
+                        ],
+                        userRemoteConfigs: [[
+                            url: 'git@github.com:MisStiCc/RailwayErpSystem.git',
+                            credentialsId: 'github-ssh-key'
+                        ]]
+                    ])
 
-                dir('src') {
-                    script {
-                        // ИСПРАВЛЕНО: одинарные кавычки вместо двойных
+                    dir('src') {
                         sh '''
                             echo "=== Git информация ==="
                             echo "Репо: $(git config --get remote.origin.url)"
@@ -194,15 +188,17 @@ pipeline {
         // ========== СТАДИЯ 4: СБОРКА JAVA/SPRING ПРИЛОЖЕНИЯ ==========
         stage('☕ Сборка Java приложения') {
             steps {
-                dir('src') {
-                    script {
+                script {
+                    dir('src') {
                         echo "Сборка Spring Boot приложения..."
 
                         // Определяем профиль Maven в зависимости от окружения
+                        def DEPLOY_ENV = params.ENVIRONMENT
                         def mavenProfile = DEPLOY_ENV == 'prod' ? '-Pproduction' :
                                           DEPLOY_ENV == 'test' ? '-Ptesting' : '-Pdevelopment'
+                        def SKIP_TESTS_FLAG = params.SKIP_TESTS ? '-DskipTests' : ''
+                        def BUILD_VERSION = params.VERSION ?: "${env.BUILD_NUMBER}-${new Date().format('yyyyMMdd-HHmm')}"
 
-                        // ИСПРАВЛЕНО: одинарные кавычки для sh
                         sh '''
                             # Устанавливаем версию в pom.xml
                             mvn versions:set -DnewVersion=''' + BUILD_VERSION + ''' -DgenerateBackupPops=false
@@ -227,11 +223,12 @@ pipeline {
                 expression { !params.SKIP_TESTS }
             }
             steps {
-                dir('src') {
-                    script {
+                script {
+                    dir('src') {
                         echo "Запуск тестов..."
 
-                        // ИСПРАВЛЕНО: одинарные кавычки
+                        def SKIP_TESTS_FLAG = params.SKIP_TESTS ? '-DskipTests' : ''
+
                         sh '''
                             # Unit-тесты
                             echo "=== Unit тесты ==="
@@ -261,11 +258,12 @@ pipeline {
         // ========== СТАДИЯ 6: АНАЛИЗ КАЧЕСТВА КОДА ==========
         stage('📊 Анализ качества') {
             steps {
-                dir('src') {
-                    script {
+                script {
+                    dir('src') {
                         echo "Анализ качества кода..."
 
-                        // ИСПРАВЛЕНО: одинарные кавычки
+                        def SKIP_TESTS_FLAG = params.SKIP_TESTS ? '-DskipTests' : ''
+
                         sh '''
                             # Проверка стиля кода
                             echo "=== Checkstyle ==="
@@ -297,11 +295,15 @@ pipeline {
                 expression { params.DEPLOY_ACTION != 'rollback' }
             }
             steps {
-                dir('src') {
-                    script {
+                script {
+                    dir('src') {
                         echo "Создание Docker образа..."
 
-                        // Собираем JAR - ИСПРАВЛЕНО
+                        def SKIP_TESTS_FLAG = params.SKIP_TESTS ? '-DskipTests' : ''
+                        def BUILD_VERSION = params.VERSION ?: "${env.BUILD_NUMBER}-${new Date().format('yyyyMMdd-HHmm')}"
+                        def DEPLOY_ENV = params.ENVIRONMENT
+
+                        // Собираем JAR
                         sh '''
                             mvn package ''' + SKIP_TESTS_FLAG + ''' -DskipTests
 
@@ -332,18 +334,18 @@ EOF
                             fi
                         '''
 
-                        // Собираем Docker образ - ИСПРАВЛЕНО
+                        // Собираем Docker образ
                         sh '''
                             # Собираем образ с тегами
                             docker build \
                                 --build-arg JAR_FILE=target/*.jar \
-                                -t ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ':' + BUILD_VERSION + ''' \
-                                -t ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ':' + DEPLOY_ENV + '''-latest \
-                                -t ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ''':latest \
+                                -t ''' + env.DOCKER_REGISTRY + '/' + env.DOCKER_NAMESPACE + '/' + env.APP_NAME + ':' + BUILD_VERSION + ''' \
+                                -t ''' + env.DOCKER_REGISTRY + '/' + env.DOCKER_NAMESPACE + '/' + env.APP_NAME + ':' + DEPLOY_ENV + '''-latest \
+                                -t ''' + env.DOCKER_REGISTRY + '/' + env.DOCKER_NAMESPACE + '/' + env.APP_NAME + ''':latest \
                                 .
 
                             # Проверяем образ
-                            docker images | grep ''' + APP_NAME + '''
+                            docker images | grep ''' + env.APP_NAME + '''
                         '''
 
                         // Сохраняем артефакты
@@ -357,20 +359,22 @@ EOF
         // ========== СТАДИЯ 8: ПУШ ДОКЕР ОБРАЗА ==========
         stage('📤 Пуш Docker образа') {
             when {
-                expression { params.DEPLOY_ACTION == 'deploy' && DEPLOY_ENV != 'dev' }
+                expression { params.DEPLOY_ACTION == 'deploy' && params.ENVIRONMENT != 'dev' }
             }
             steps {
                 script {
                     echo "Отправка Docker образа в registry..."
 
-                    // ИСПРАВЛЕНО
+                    def BUILD_VERSION = params.VERSION ?: "${env.BUILD_NUMBER}-${new Date().format('yyyyMMdd-HHmm')}"
+                    def DEPLOY_ENV = params.ENVIRONMENT
+
                     sh '''
                         # Логин в registry (если требуется)
-                        # docker login ''' + DOCKER_REGISTRY + ''' -u ${DOCKER_USER} -p ${DOCKER_PASSWORD}
+                        # docker login ''' + env.DOCKER_REGISTRY + ''' -u ${DOCKER_USER} -p ${DOCKER_PASSWORD}
 
                         # Пушим образы
-                        docker push ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ':' + BUILD_VERSION + '''
-                        docker push ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ':' + DEPLOY_ENV + '''-latest
+                        docker push ''' + env.DOCKER_REGISTRY + '/' + env.DOCKER_NAMESPACE + '/' + env.APP_NAME + ':' + BUILD_VERSION + '''
+                        docker push ''' + env.DOCKER_REGISTRY + '/' + env.DOCKER_NAMESPACE + '/' + env.APP_NAME + ':' + DEPLOY_ENV + '''-latest
 
                         echo "✅ Образы отправлены в registry"
                     '''
@@ -385,6 +389,7 @@ EOF
             }
             steps {
                 script {
+                    def DEPLOY_ENV = params.ENVIRONMENT
                     echo "Деплой в ${DEPLOY_ENV} окружение..."
 
                     // В зависимости от окружения используем разные методы деплоя
@@ -396,7 +401,7 @@ EOF
                                 docker-compose -f src/docker-compose.yml up -d || echo "docker-compose не найден, пропускаем"
 
                                 # Или запуск напрямую
-                                # docker run -d -p 8080:8080 --name ''' + APP_NAME + '''-dev ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ''':latest
+                                # docker run -d -p 8080:8080 --name ''' + env.APP_NAME + '''-dev ''' + env.DOCKER_REGISTRY + '/' + env.DOCKER_NAMESPACE + '/' + env.APP_NAME + ''':latest
 
                                 echo "✅ Приложение запущено на http://localhost:8080"
                             '''
@@ -435,7 +440,7 @@ EOF
         // ========== СТАДИЯ 10: РОЛЛБЭК ==========
         stage('↩️ Роллбэк') {
             when {
-                expression { params.DEPLOY_ACTION == 'rollback' && DEPLOY_ENV != 'dev' }
+                expression { params.DEPLOY_ACTION == 'rollback' && params.ENVIRONMENT != 'dev' }
             }
             steps {
                 script {
@@ -445,7 +450,7 @@ EOF
                         # Роллбэк на предыдущую версию
                         echo "Откат на предыдущую стабильную версию..."
                         # Здесь команды для роллбэка
-                        # например: kubectl rollout undo deployment/''' + APP_NAME + '''
+                        # например: kubectl rollout undo deployment/''' + env.APP_NAME + '''
                         echo "Роллбэк выполнен"
                     '''
                 }
@@ -458,17 +463,20 @@ EOF
         // Всегда выполнять
         always {
             script {
+                def BUILD_VERSION = params.VERSION ?: "${env.BUILD_NUMBER}-${new Date().format('yyyyMMdd-HHmm')}"
+                def DEPLOY_ENV = params.ENVIRONMENT
+
                 echo """
                 ========================================
-                    ИТОГИ СБОРКИ #${BUILD_NUMBER}
+                    ИТОГИ СБОРКИ #${env.BUILD_NUMBER}
                 ========================================
-                Проект:      ${PROJECT_NAME}
+                Проект:      ${env.PROJECT_NAME}
                 Статус:      ${currentBuild.currentResult}
                 Окружение:   ${DEPLOY_ENV}
                 Версия:      ${BUILD_VERSION}
                 Длительность: ${currentBuild.durationString}
                 ========================================
-                Подробности: ${BUILD_URL}
+                Подробности: ${env.BUILD_URL}
                 ========================================
                 """
 
@@ -489,15 +497,18 @@ EOF
                 echo "🎉 Сборка успешно завершена!"
 
                 if (params.SEND_TELEGRAM) {
+                    def BUILD_VERSION = params.VERSION ?: "${env.BUILD_NUMBER}-${new Date().format('yyyyMMdd-HHmm')}"
+                    def DEPLOY_ENV = params.ENVIRONMENT
+
                     sendTelegramNotification(
                         status: 'success',
                         message: "✅ Сборка Railway ERP успешна",
                         details: """
-                        Сборка: #${BUILD_NUMBER}
+                        Сборка: #${env.BUILD_NUMBER}
                         Окружение: ${DEPLOY_ENV}
                         Версия: ${BUILD_VERSION}
                         Длительность: ${currentBuild.durationString}
-                        Ссылка: ${BUILD_URL}
+                        Ссылка: ${env.BUILD_URL}
                         """
                     )
                 }
@@ -513,14 +524,16 @@ EOF
                 echo "❌ Сборка завершилась с ошибкой!"
 
                 if (params.SEND_TELEGRAM) {
+                    def DEPLOY_ENV = params.ENVIRONMENT
+
                     sendTelegramNotification(
                         status: 'failure',
                         message: "❌ Сборка Railway ERP упала",
                         details: """
-                        Сборка: #${BUILD_NUMBER}
+                        Сборка: #${env.BUILD_NUMBER}
                         Окружение: ${DEPLOY_ENV}
                         Ошибка в стадии: ${env.STAGE_NAME}
-                        Ссылка: ${BUILD_URL}
+                        Ссылка: ${env.BUILD_URL}
                         """
                     )
                 }
@@ -533,11 +546,13 @@ EOF
                 echo "⏸️ Сборка была отменена"
 
                 if (params.SEND_TELEGRAM) {
+                    def DEPLOY_ENV = params.ENVIRONMENT
+
                     sendTelegramNotification(
                         status: 'aborted',
                         message: "⏸️ Сборка Railway ERP отменена",
                         details: """
-                        Сборка: #${BUILD_NUMBER}
+                        Сборка: #${env.BUILD_NUMBER}
                         Окружение: ${DEPLOY_ENV}
                         """
                     )
@@ -551,14 +566,16 @@ EOF
                 echo "⚠️ Сборка нестабильна (тесты не прошли)"
 
                 if (params.SEND_TELEGRAM) {
+                    def DEPLOY_ENV = params.ENVIRONMENT
+
                     sendTelegramNotification(
                         status: 'unstable',
                         message: "⚠️ Сборка Railway ERP нестабильна",
                         details: """
-                        Сборка: #${BUILD_NUMBER}
+                        Сборка: #${env.BUILD_NUMBER}
                         Окружение: ${DEPLOY_ENV}
                         Причина: Тесты не прошли
-                        Ссылка: ${BUILD_URL}
+                        Ссылка: ${env.BUILD_URL}
                         """
                     )
                 }
@@ -603,7 +620,6 @@ def healthCheck() {
             echo ""
             echo "=== Проверка доступности ==="
             ping -c 1 github.com && echo "✅ GitHub: доступен"
-            # ping -c 1 ''' + DOCKER_REGISTRY + ''' && echo "✅ Docker Registry: доступен"
 
             echo ""
             echo "=== Системные ресурсы ==="
