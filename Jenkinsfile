@@ -1,11 +1,32 @@
 pipeline {
     agent any
     
+    tools {
+        // Указываем Java 17 для сборки
+        jdk 'jdk17'
+    }
+
     triggers {
         pollSCM('H/5 * * * *')
     }
 
     stages {
+        stage('Setup Environment') {
+            steps {
+                echo '🔧 Setting up build environment...'
+                sh '''
+                    echo "=== Java Version ==="
+                    java -version
+                    echo ""
+                    echo "=== Maven Version ==="
+                    ./mvnw --version || echo "Maven wrapper not available"
+                    echo ""
+                    echo "=== System Information ==="
+                    uname -a
+                '''
+            }
+        }
+
         stage('Checkout') {
             steps {
                 checkout scm
@@ -14,9 +35,6 @@ pipeline {
                 sh '''
                     echo "Repository information:"
                     git log --oneline -3
-                    echo ""
-                    echo "Branch information:"
-                    git branch -a
                 '''
             }
         }
@@ -44,39 +62,48 @@ pipeline {
                         echo '📦 Maven project detected'
                         sh '''
                             echo "=== Java Information ==="
-                            java -version 2>&1 | head -3 || echo "Java not available"
+                            java -version
                             echo ""
                             echo "=== Maven Wrapper ==="
-                            chmod +x mvnw 2>/dev/null || echo "Cannot make mvnw executable"
-                            ./mvnw --version 2>&1 | head -3 || echo "Maven wrapper not working"
+                            chmod +x mvnw 2>/dev/null && echo "Maven wrapper permissions set"
+                            ./mvnw --version 2>&1 | head -3
                             echo ""
-                            echo "=== Building with Maven ==="
-                            ./mvnw clean compile -DskipTests || echo "Maven build failed"
+                            echo "=== Building with Maven (Java 17) ==="
+                            # Явно указываем Java 17 для компиляции
+                            ./mvnw clean compile -DskipTests \
+                                -Djava.version=17 \
+                                -Dmaven.compiler.source=17 \
+                                -Dmaven.compiler.target=17
                             echo ""
                             echo "=== Generated files ==="
                             find target/ -name "*.jar" -o -name "*.war" 2>/dev/null | head -5 || echo "No JAR/WAR files found"
                         '''
-                    } else if (fileExists('package.json')) {
-                        echo '📦 Node.js project detected'
-                        sh '''
-                            echo "=== Node.js Information ==="
-                            node --version || echo "Node.js not available"
-                            npm --version || echo "npm not available"
-                            echo ""
-                            echo "=== Installing dependencies ==="
-                            npm install --silent || echo "npm install failed"
-                            echo ""
-                            echo "=== Building ==="
-                            npm run build || echo "npm build failed"
-                        '''
                     } else {
-                        echo '⚠️  No build configuration found'
+                        echo '⚠️  No Maven project found'
+                    }
+                }
+            }
+
+            post {
+                success {
+                    echo '✅ Build completed successfully'
+                }
+                failure {
+                    echo '❌ Build failed'
+                    script {
+                        // Попробуем альтернативный способ сборки
+                        echo 'Trying alternative build approach...'
                         sh '''
-                            echo "Project structure:"
-                            ls -la
-                            echo ""
-                            echo "Looking for build files:"
-                            find . -name "pom.xml" -o -name "package.json" -o -name "build.gradle" -o -name "*.sln" | head -10
+                            # Проверяем версию Java в pom.xml
+                            echo "Checking Java version in pom.xml..."
+                            grep -i "java.version" pom.xml
+
+                            # Пробуем собрать с явными параметрами
+                            ./mvnw clean compile -DskipTests \
+                                -Dmaven.compiler.fork=true \
+                                -Dmaven.compiler.executable=$(which java) \
+                                -Dmaven.compiler.source=17 \
+                                -Dmaven.compiler.target=17
                         '''
                     }
                 }
@@ -92,7 +119,7 @@ pipeline {
                         echo '📦 Running Maven tests'
                         sh '''
                             echo "=== Running Maven tests ==="
-                            ./mvnw test
+                            ./mvnw test -Djava.version=17
                             echo ""
                             echo "=== Test results ==="
                             find target/surefire-reports -name "*.txt" -type f 2>/dev/null | head -3 | while read file; do
@@ -101,15 +128,28 @@ pipeline {
                             done
                         '''
                         junit 'target/surefire-reports/**/*.xml'
-                    } else if (fileExists('package.json')) {
-                        sh '''
-                            grep -q '"test"' package.json && npm test || echo "No test script in package.json"
-                        '''
                     } else {
                         echo '📭 No tests configured'
+                    }
+                }
+            }
+        }
+
+        stage('Package Application') {
+            steps {
+                echo '📦 Packaging application...'
+
+                script {
+                    if (fileExists('pom.xml')) {
                         sh '''
-                            echo "Looking for test files:"
-                            find . -name "*Test*.java" -o -name "*test*.py" -o -name "*.spec.js" | head -5
+                            echo "=== Creating JAR package ==="
+                            ./mvnw package -DskipTests \
+                                -Djava.version=17 \
+                                -Dmaven.compiler.source=17 \
+                                -Dmaven.compiler.target=17
+                            echo ""
+                            echo "=== Created artifacts ==="
+                            ls -la target/*.jar 2>/dev/null || echo "No JAR files created"
                         '''
                     }
                 }
@@ -131,11 +171,10 @@ pipeline {
                             docker-compose up -d --build || echo "Docker Compose not available"
                             echo ""
                             echo "Checking containers:"
-                            docker-compose ps 2>/dev/null || echo "Cannot check containers"
+                            docker ps --filter "name=railway" || echo "No containers found"
                         '''
                     } else {
                         echo '📭 No deployment configuration found'
-                        sh 'echo "Test deployment would be executed here"'
                     }
                 }
             }
@@ -148,16 +187,14 @@ pipeline {
                 sh '''
                     echo "=== Code Statistics ==="
                     echo ""
-                    echo "Lines of code:"
-                    find . -name "*.java" -o -name "*.py" -o -name "*.js" -o -name "*.ts" | \
-                    xargs wc -l 2>/dev/null | tail -1 | awk '{print "Total lines:", $1}' || echo "Cannot count lines"
+                    echo "Lines of Java code:"
+                    find src/ -name "*.java" | xargs wc -l 2>/dev/null | tail -1 || echo "No Java files found"
                     echo ""
-                    echo "Project size:"
-                    du -sh . 2>/dev/null | awk '{print "Size:", $1}' || echo "Cannot get size"
+                    echo "Project structure:"
+                    ls -la
                     echo ""
                     echo "TODO/FIXME markers:"
-                    grep -r -i "TODO\\|FIXME\\|HACK\\|XXX" --include="*.java" --include="*.py" --include="*.js" --include="*.ts" . 2>/dev/null | \
-                    head -5 || echo "No TODO/FIXME markers found"
+                    grep -r -i "TODO\\|FIXME\\|HACK\\|XXX" src/ 2>/dev/null | head -5 || echo "No TODO/FIXME markers found"
                 '''
             }
         }
@@ -182,21 +219,23 @@ pipeline {
                     echo "Result: ${currentBuild.currentResult}" > build_logs/result.txt
                     echo "Duration: ${currentBuild.durationString}" >> build_logs/result.txt
 
-                    # System information
-                    echo "=== System Info ===" > build_logs/system_info.txt
-                    java -version 2>&1 >> build_logs/system_info.txt || echo "Java: Not available" >> build_logs/system_info.txt
+                    # Java information
+                    echo "=== Java Info ===" >> build_logs/system_info.txt
+                    java -version 2>&1 >> build_logs/system_info.txt
+
+                    # Maven information
                     echo "" >> build_logs/system_info.txt
-                    echo "Maven:" >> build_logs/system_info.txt
+                    echo "=== Maven Info ===" >> build_logs/system_info.txt
                     ./mvnw --version 2>&1 | head -3 >> build_logs/system_info.txt 2>/dev/null || echo "Maven: Not available" >> build_logs/system_info.txt
+
+                    # Build artifacts
+                    echo "" >> build_logs/system_info.txt
+                    echo "=== Build Artifacts ===" >> build_logs/system_info.txt
+                    find target/ -name "*.jar" -type f 2>/dev/null >> build_logs/system_info.txt || echo "No artifacts" >> build_logs/system_info.txt
                 '''
 
                 // Archive artifacts
-                archiveArtifacts artifacts: 'build_logs/**/*', allowEmptyArchive: true
-
-                // Archive build results if they exist
-                if (fileExists('target/')) {
-                    archiveArtifacts artifacts: 'target/*.jar, target/*.war', allowEmptyArchive: true
-                }
+                archiveArtifacts artifacts: 'build_logs/**/*, target/*.jar', allowEmptyArchive: true
             }
         }
 
@@ -204,21 +243,8 @@ pipeline {
             echo '✅ ✅ ✅ Build successful! ✅ ✅ ✅'
 
             script {
-                // Send success notification (uncomment if needed)
-                /*
-                emailext (
-                    subject: "✅ Build Successful: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    body: """
-                    Build ${env.BUILD_NUMBER} of ${env.JOB_NAME} was successful!
-
-                    Branch: ${env.BRANCH_NAME}
-                    Duration: ${currentBuild.durationString}
-
-                    View build: ${env.BUILD_URL}
-                    """,
-                    to: 'team@example.com'
-                )
-                */
+                // Можно добавить Telegram уведомление здесь
+                // sendTelegram("✅ Build successful: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
             }
         }
 
@@ -226,37 +252,14 @@ pipeline {
             echo '❌ ❌ ❌ Build failed! ❌ ❌ ❌'
 
             script {
-                // Send failure notification (uncomment if needed)
-                /*
-                emailext (
-                    subject: "❌ Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                    body: """
-                    Build ${env.BUILD_NUMBER} of ${env.JOB_NAME} has failed!
-
-                    Branch: ${env.BRANCH_NAME}
-                    Stage: ${env.STAGE_NAME}
-                    Duration: ${currentBuild.durationString}
-
-                    View build: ${env.BUILD_URL}
-                    Check logs for details.
-                    """,
-                    to: 'team@example.com'
-                )
-                */
+                // Можно добавить Telegram уведомление об ошибке
+                // sendTelegram("❌ Build failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
             }
-        }
-
-        unstable {
-            echo '⚠️ ⚠️ ⚠️ Build unstable! ⚠️ ⚠️ ⚠️'
-        }
-
-        changed {
-            echo '🔄 Build status changed!'
         }
 
         cleanup {
             echo '🧹 Cleaning workspace...'
-            // Uncomment to clean workspace after build
+            // Раскомментировать для очистки workspace после сборки
             // cleanWs()
         }
     }
@@ -266,10 +269,6 @@ pipeline {
         BUILD_NUMBER = "${env.BUILD_NUMBER}"
         BUILD_URL = "${env.BUILD_URL}"
         JOB_NAME = "${env.JOB_NAME}"
-
-        // Uncomment and configure if needed
-        // DEPLOY_ENV = 'test'
-        // ARTIFACTORY_URL = 'https://artifactory.example.com'
-        // SONAR_HOST_URL = 'https://sonar.example.com'
+        JAVA_HOME = "${tool 'jdk17'}"
     }
 }
