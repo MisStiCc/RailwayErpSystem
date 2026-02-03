@@ -121,7 +121,7 @@ pipeline {
                 script {
                     echo "Проверка инструментов и зависимостей..."
 
-                    sh """
+                    sh '''
                         # Проверяем версии инструментов
                         echo "=== Информация о системе ==="
                         java -version
@@ -136,7 +136,7 @@ pipeline {
 
                         # Очистка workspace
                         echo "Очистка workspace..."
-                    """
+                    '''
 
                     // Очищаем workspace, но сохраняем важные файлы
                     cleanWs(
@@ -170,7 +170,8 @@ pipeline {
 
                 dir('src') {
                     script {
-                        sh """
+                        // ИСПРАВЛЕНО: одинарные кавычки вместо двойных
+                        sh '''
                             echo "=== Git информация ==="
                             echo "Репо: $(git config --get remote.origin.url)"
                             echo "Ветка: $(git branch --show-current)"
@@ -180,11 +181,11 @@ pipeline {
                             echo "Сообщение: $(git log -1 --pretty=format:'%s')"
                             echo ""
                             echo "=== Изменения ==="
-                            if [ "${env.GIT_PREVIOUS_COMMIT}" != "" ]; then
+                            if [ "${GIT_PREVIOUS_COMMIT}" != "" ]; then
                                 echo "Измененные файлы:"
-                                git diff --name-only ${env.GIT_PREVIOUS_COMMIT} ${env.GIT_COMMIT} 2>/dev/null || true
+                                git diff --name-only ${GIT_PREVIOUS_COMMIT} ${GIT_COMMIT} 2>/dev/null || true
                             fi
-                        """
+                        '''
                     }
                 }
             }
@@ -201,19 +202,20 @@ pipeline {
                         def mavenProfile = DEPLOY_ENV == 'prod' ? '-Pproduction' :
                                           DEPLOY_ENV == 'test' ? '-Ptesting' : '-Pdevelopment'
 
-                        sh """
+                        // ИСПРАВЛЕНО: одинарные кавычки для sh
+                        sh '''
                             # Устанавливаем версию в pom.xml
-                            mvn versions:set -DnewVersion=${BUILD_VERSION} -DgenerateBackupPops=false
+                            mvn versions:set -DnewVersion=''' + BUILD_VERSION + ''' -DgenerateBackupPops=false
 
                             # Сборка проекта
-                            echo "Используем профиль: ${mavenProfile}"
-                            mvn clean compile ${mavenProfile} ${SKIP_TESTS_FLAG}
+                            echo "Используем профиль: ''' + mavenProfile + '''"
+                            mvn clean compile ''' + mavenProfile + ' ' + SKIP_TESTS_FLAG + '''
 
                             # Проверяем результат сборки
                             if [ -f "target/classes/application.yml" ]; then
                                 echo "✅ Конфигурация собрана успешно"
                             fi
-                        """
+                        '''
                     }
                 }
             }
@@ -229,23 +231,24 @@ pipeline {
                     script {
                         echo "Запуск тестов..."
 
-                        sh """
+                        // ИСПРАВЛЕНО: одинарные кавычки
+                        sh '''
                             # Unit-тесты
                             echo "=== Unit тесты ==="
-                            mvn test ${SKIP_TESTS_FLAG}
+                            mvn test ''' + SKIP_TESTS_FLAG + '''
 
                             # Интеграционные тесты (если есть)
                             if [ -f "src/test/java/**/*IT.java" ]; then
                                 echo "=== Интеграционные тесты ==="
-                                mvn verify -DskipUnitTests ${SKIP_TESTS_FLAG}
+                                mvn verify -DskipUnitTests ''' + SKIP_TESTS_FLAG + '''
                             fi
 
                             # Генерация отчетов
                             mvn surefire-report:report-only
 
                             echo "=== Результаты тестов ==="
-                            echo "Тестов выполнено: \$(find target/surefire-reports -name '*.xml' | xargs grep -h 'tests=' | sed 's/.*tests=\"//' | sed 's/\".*//' | awk '{sum+=\$1} END {print sum}')"
-                        """
+                            echo "Тестов выполнено: $(find target/surefire-reports -name '*.xml' | xargs grep -h 'tests=' | sed 's/.*tests="//' | sed 's/".*//' | awk '{sum+=\$1} END {print sum}')"
+                        '''
 
                         // Сохраняем отчеты о тестах
                         junit '**/target/surefire-reports/*.xml'
@@ -262,23 +265,24 @@ pipeline {
                     script {
                         echo "Анализ качества кода..."
 
-                        sh """
+                        // ИСПРАВЛЕНО: одинарные кавычки
+                        sh '''
                             # Проверка стиля кода
                             echo "=== Checkstyle ==="
-                            mvn checkstyle:check ${SKIP_TESTS_FLAG} || true
+                            mvn checkstyle:check ''' + SKIP_TESTS_FLAG + ''' || true
 
                             # Поиск багов
                             echo "=== SpotBugs ==="
-                            mvn spotbugs:check ${SKIP_TESTS_FLAG} || true
+                            mvn spotbugs:check ''' + SKIP_TESTS_FLAG + ''' || true
 
                             # Анализ зависимостей
                             echo "=== OWASP Dependency Check ==="
-                            mvn org.owasp:dependency-check-maven:check ${SKIP_TESTS_FLAG} || true
+                            mvn org.owasp:dependency-check-maven:check ''' + SKIP_TESTS_FLAG + ''' || true
 
                             # Тесты покрытия кода
                             echo "=== JaCoCo (покрытие кода) ==="
-                            mvn jacoco:prepare-agent test jacoco:report ${SKIP_TESTS_FLAG}
-                        """
+                            mvn jacoco:prepare-agent test jacoco:report ''' + SKIP_TESTS_FLAG + '''
+                        '''
 
                         // Сохраняем отчеты
                         archiveArtifacts artifacts: '**/target/site/**', allowEmptyArchive: true
@@ -297,20 +301,20 @@ pipeline {
                     script {
                         echo "Создание Docker образа..."
 
-                        // Собираем JAR
-                        sh """
-                            mvn package ${SKIP_TESTS_FLAG} -DskipTests
+                        // Собираем JAR - ИСПРАВЛЕНО
+                        sh '''
+                            mvn package ''' + SKIP_TESTS_FLAG + ''' -DskipTests
 
                             # Проверяем что JAR создан
-                            JAR_FILE=\$(find target -name "*.jar" ! -name "*sources*" ! -name "*javadoc*" | head -1)
-                            if [ -f "\$JAR_FILE" ]; then
-                                echo "✅ JAR создан: \${JAR_FILE}"
-                                ls -lh "\$JAR_FILE"
+                            JAR_FILE=$(find target -name "*.jar" ! -name "*sources*" ! -name "*javadoc*" | head -1)
+                            if [ -f "$JAR_FILE" ]; then
+                                echo "✅ JAR создан: ${JAR_FILE}"
+                                ls -lh "$JAR_FILE"
                             else
                                 echo "❌ JAR не найден!"
                                 exit 1
                             fi
-                        """
+                        '''
 
                         // Создаем Dockerfile если его нет
                         sh '''
@@ -328,19 +332,19 @@ EOF
                             fi
                         '''
 
-                        // Собираем Docker образ
-                        sh """
+                        // Собираем Docker образ - ИСПРАВЛЕНО
+                        sh '''
                             # Собираем образ с тегами
                             docker build \
                                 --build-arg JAR_FILE=target/*.jar \
-                                -t ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/${APP_NAME}:${BUILD_VERSION} \
-                                -t ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/${APP_NAME}:${DEPLOY_ENV}-latest \
-                                -t ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/${APP_NAME}:latest \
+                                -t ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ':' + BUILD_VERSION + ''' \
+                                -t ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ':' + DEPLOY_ENV + '''-latest \
+                                -t ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ''':latest \
                                 .
 
                             # Проверяем образ
-                            docker images | grep ${APP_NAME}
-                        """
+                            docker images | grep ''' + APP_NAME + '''
+                        '''
 
                         // Сохраняем артефакты
                         archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
@@ -359,16 +363,17 @@ EOF
                 script {
                     echo "Отправка Docker образа в registry..."
 
-                    sh """
+                    // ИСПРАВЛЕНО
+                    sh '''
                         # Логин в registry (если требуется)
-                        # docker login ${DOCKER_REGISTRY} -u \${DOCKER_USER} -p \${DOCKER_PASSWORD}
+                        # docker login ''' + DOCKER_REGISTRY + ''' -u ${DOCKER_USER} -p ${DOCKER_PASSWORD}
 
                         # Пушим образы
-                        docker push ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/${APP_NAME}:${BUILD_VERSION}
-                        docker push ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/${APP_NAME}:${DEPLOY_ENV}-latest
+                        docker push ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ':' + BUILD_VERSION + '''
+                        docker push ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ':' + DEPLOY_ENV + '''-latest
 
                         echo "✅ Образы отправлены в registry"
-                    """
+                    '''
                 }
             }
         }
@@ -385,44 +390,44 @@ EOF
                     // В зависимости от окружения используем разные методы деплоя
                     switch(DEPLOY_ENV) {
                         case 'dev':
-                            sh """
+                            sh '''
                                 # Локальный деплой для разработки
                                 echo "Запуск в Docker для разработки..."
                                 docker-compose -f src/docker-compose.yml up -d || echo "docker-compose не найден, пропускаем"
 
                                 # Или запуск напрямую
-                                # docker run -d -p 8080:8080 --name ${APP_NAME}-dev ${DOCKER_REGISTRY}/${DOCKER_NAMESPACE}/${APP_NAME}:latest
+                                # docker run -d -p 8080:8080 --name ''' + APP_NAME + '''-dev ''' + DOCKER_REGISTRY + '/' + DOCKER_NAMESPACE + '/' + APP_NAME + ''':latest
 
                                 echo "✅ Приложение запущено на http://localhost:8080"
-                            """
+                            '''
                             break
                         case 'test':
-                            sh """
+                            sh '''
                                 # Деплой на тестовый сервер
                                 echo "Деплой на тестовый сервер..."
                                 # Здесь команды для деплоя на тестовый сервер
                                 # например: kubectl apply -f k8s/test-deployment.yaml
                                 echo "Деплой на тестовое окружение выполнен"
-                            """
+                            '''
                             break
                         case 'prod':
-                            sh """
+                            sh '''
                                 # Деплой в прод
                                 echo "Деплой в production..."
                                 # Здесь команды для деплоя в прод
                                 # например: kubectl apply -f k8s/prod-deployment.yaml
                                 # или: ansible-playbook deploy-prod.yml
                                 echo "Деплой в production выполнен"
-                            """
+                            '''
                             break
                     }
 
                     // Проверка здоровья после деплоя
-                    sh """
+                    sh '''
                         echo "Проверка здоровья приложения..."
                         sleep 10
                         curl -f http://localhost:8080/actuator/health || echo "Проверка здоровья не удалась, приложение может быть не готово"
-                    """
+                    '''
                 }
             }
         }
@@ -436,13 +441,13 @@ EOF
                 script {
                     echo "Выполнение роллбэка..."
 
-                    sh """
+                    sh '''
                         # Роллбэк на предыдущую версию
                         echo "Откат на предыдущую стабильную версию..."
                         # Здесь команды для роллбэка
-                        # например: kubectl rollout undo deployment/${APP_NAME}
+                        # например: kubectl rollout undo deployment/''' + APP_NAME + '''
                         echo "Роллбэк выполнен"
-                    """
+                    '''
                 }
             }
         }
@@ -589,7 +594,7 @@ def healthCheck() {
     echo "🔍 Проверка здоровья сервисов..."
 
     try {
-        sh """
+        sh '''
             echo "=== Проверка инструментов ==="
             java -version && echo "✅ Java: OK"
             mvn -version && echo "✅ Maven: OK"
@@ -598,13 +603,13 @@ def healthCheck() {
             echo ""
             echo "=== Проверка доступности ==="
             ping -c 1 github.com && echo "✅ GitHub: доступен"
-            # ping -c 1 ${DOCKER_REGISTRY} && echo "✅ Docker Registry: доступен"
+            # ping -c 1 ''' + DOCKER_REGISTRY + ''' && echo "✅ Docker Registry: доступен"
 
             echo ""
             echo "=== Системные ресурсы ==="
             free -h | grep Mem && echo "✅ Память: OK"
             df -h / && echo "✅ Диск: OK"
-        """
+        '''
     } catch (Exception e) {
         echo "⚠️ Проверка здоровья обнаружила проблемы: ${e.message}"
     }
