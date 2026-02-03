@@ -1,57 +1,113 @@
-# Создайте директорию если нет
-mkdir -p .github/workflows
+pipeline {
+    agent any
+    
+    tools {
+        jdk 'jdk17'
+    }
 
-# Создайте ci.yml
-cat > .github/workflows/ci.yml << 'EOF'
-name: CI/CD Pipeline
-on:
-  push:
-    branches: [ main, develop, feature/** ]
-  pull_request:
-    branches: [ main ]
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    env:
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-    
-    steps:
-    - name: Send Telegram Start
-      run: |
-        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
-          -d "chat_id=$TELEGRAM_CHAT_ID" \
-          -d "text=🚀 GitHub Actions: Build Started\n\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nAuthor: ${{ github.actor }}" \
-          -d "parse_mode=Markdown"
-    
-    - uses: actions/checkout@v4
-    
-    - name: Setup Java
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-    
-    - name: Build with Maven
-      run: |
-        chmod +x mvnw
-        ./mvnw clean compile -DskipTests
-      
-    - name: Send Telegram Result
-      if: always()
-      run: |
-        if [ "${{ job.status }}" == "success" ]; then
-          EMOJI="✅"
-          STATUS="SUCCESS"
-        else
-          EMOJI="❌"
-          STATUS="FAILED"
-        fi
-        
-        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
-          -d "chat_id=$TELEGRAM_CHAT_ID" \
-          -d "text=$EMOJI Build Complete\n\nStatus: $STATUS\nBranch: ${{ github.ref_name }}\nView Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-          -d "parse_mode=Markdown"
-EOF
+    stages {
+        stage('Setup Environment') {
+            steps {
+                echo '🔧 Setting up build environment...'
+                sh '''
+                    echo "=== Java Version ==="
+                    java -version
+                    echo ""
+                    echo "=== Maven Version ==="
+                    ./mvnw --version || echo "Maven wrapper not available"
+                '''
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "🚀 Build started for branch: ${env.BRANCH_NAME}"
+                echo "📝 Commit: ${GIT_COMMIT}"
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo '🔨 Building Railway ERP System...'
+
+                script {
+                    if (fileExists('pom.xml')) {
+                        echo '📦 Maven project detected'
+                        sh '''
+                            echo "=== Building with Maven (Java 17) ==="
+                            chmod +x mvnw 2>/dev/null
+                            ./mvnw clean compile -DskipTests \
+                                -Djava.version=17 \
+                                -Dmaven.compiler.source=17 \
+                                -Dmaven.compiler.target=17
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo '🧪 Running tests...'
+
+                script {
+                    if (fileExists('pom.xml')) {
+                        sh './mvnw test -Djava.version=17'
+                        junit 'target/surefire-reports/**/*.xml'
+                    }
+                }
+            }
+        }
+
+        stage('Package') {
+            steps {
+                echo '📦 Packaging application...'
+
+                script {
+                    if (fileExists('pom.xml')) {
+                        sh './mvnw package -DskipTests -Djava.version=17'
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo '📊 Build completed'
+            echo "Status: ${currentBuild.currentResult}"
+
+            script {
+                sh '''
+                    mkdir -p build_logs
+                    date > build_logs/build_time.txt
+                    echo "Job: ${JOB_NAME} #${BUILD_NUMBER}" >> build_logs/build_time.txt
+                '''
+                archiveArtifacts artifacts: 'build_logs/**/*, target/*.jar', allowEmptyArchive: true
+            }
+        }
+
+        success {
+            echo '✅ Build successful!'
+        }
+
+        failure {
+            echo '❌ Build failed!'
+        }
+
+        cleanup {
+            echo '🧹 Cleaning workspace...'
+        }
+    }
+
+    environment {
+        PROJECT_NAME = 'RailwayERP'
+        BUILD_NUMBER = "${env.BUILD_NUMBER}"
+        BUILD_URL = "${env.BUILD_URL}"
+    }
+}
